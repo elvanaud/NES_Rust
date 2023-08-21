@@ -40,12 +40,28 @@ impl<'a> CPU6502<'a>{
         let opcode = self.pcRead();
         
         match opcode{
-            0x61 => self.ZeroPageIndexedIndirect(Self::ADC),
+            0x00 => (),
+            0x06 => self.ZeroPage(Self::ASL),
+            0x0A => self.Accumulator(Self::ASL),
+            0x0E => self.AbsoluteAdr(Self::ASL),
+            0x16 => self.ZeroPageIndexedX(Self::ASL),
+            0x1E => self.AbsoluteX(Self::ASL),
+            0x21 => self.ZeroPageIndexedXIndirect(Self::AND),
+            0x25 => self.ZeroPage(Self::AND),
+            0x29 => self.Immediate(Self::AND),
+            0x2D => self.AbsoluteAdr(Self::AND),
+            0x31 => self.ZeroPageIndirectIndexedY(Self::AND),
+            0x35 => self.ZeroPageIndexedX(Self::AND),
+            0x39 => self.AbsoluteY(Self::AND),
+            0x3D => self.AbsoluteX(Self::AND),
+            0x61 => self.ZeroPageIndexedXIndirect(Self::ADC),
             0x65 => self.ZeroPage(Self::ADC),
             0x69 => self.Immediate(Self::ADC),
             0x6D => self.AbsoluteAdr(Self::ADC),
-            0x71 => self.ZeroPageIndirectIndexed(Self::ADC),
+            0x71 => self.ZeroPageIndirectIndexedY(Self::ADC),
             0x75 => self.ZeroPageIndexedX(Self::ADC),
+            0x7D => self.AbsoluteX(Self::ADC),
+            0x79 => self.AbsoluteY(Self::ADC),
             _=>()
         }
     }
@@ -65,6 +81,16 @@ impl<'a> CPU6502<'a>{
     fn ADC(&mut self){
         
         self.acc+=self.buffer;
+    }
+    
+    fn AND(&mut self){
+        self.acc&=self.buffer;
+    }
+    
+    fn ASL(&mut self){
+        let c = self.buffer>>7;
+        self.acc<<=1;
+        self.cycles+=2;
     }
     
     fn pcRead(&mut self)->u8{
@@ -92,6 +118,36 @@ impl<'a> CPU6502<'a>{
         inst(self);
     }
     
+    fn AbsoluteX(&mut self, inst:fn (&mut Self)->()){
+        self.cycles = 4;
+        
+        let adrLow = self.pcRead();
+        let adrHigh = self.pcRead();
+        let adr = self.handlePageCross(to16(adrHigh, adrLow),self.x);
+        self.buffer = self.bus.read(adr);
+        
+        inst(self);
+    }
+    
+    fn AbsoluteY(&mut self, inst:fn (&mut Self)->()){
+        self.cycles = 4;
+        
+        let adrLow = self.pcRead();
+        let adrHigh = self.pcRead();
+        let adr = self.handlePageCross(to16(adrHigh, adrLow),self.y);
+        self.buffer = self.bus.read(adr);
+        
+        inst(self);
+    }
+    
+    fn Accumulator(&mut self, inst:fn(&mut Self)->()){
+        self.cycles = 0; //always paired with instruction that add 2 cycles to the other modes
+        
+        self.buffer = self.acc;
+        
+        inst(self);
+    }
+    
     fn Immediate(&mut self, inst: fn(&mut Self)->()){
         self.cycles = 2;
         
@@ -109,7 +165,7 @@ impl<'a> CPU6502<'a>{
         inst(self);
     }
     
-    fn ZeroPageIndexedIndirect(&mut self, inst: fn(&mut Self)->()){
+    fn ZeroPageIndexedXIndirect(&mut self, inst: fn(&mut Self)->()){
         self.cycles = 6;
         
         let offset = self.pcRead() + self.x;
@@ -120,7 +176,7 @@ impl<'a> CPU6502<'a>{
         inst(self);
     }
     
-    fn ZeroPageIndirectIndexed(&mut self, inst: fn(&mut Self)->()){
+    fn ZeroPageIndirectIndexedY(&mut self, inst: fn(&mut Self)->()){
         self.cycles = 5;
         
         let offset = self.pcRead();
@@ -136,6 +192,15 @@ impl<'a> CPU6502<'a>{
         self.cycles = 4;
         
         let offset = self.pcRead() + self.x;
+        self.buffer = self.bus.read(to16(0, offset));
+        
+        inst(self);
+    }
+    
+    fn ZeroPageIndexedY(&mut self, inst: fn(&mut Self)->()){
+        self.cycles = 4;
+        
+        let offset = self.pcRead() + self.y;
         self.buffer = self.bus.read(to16(0, offset));
         
         inst(self);
