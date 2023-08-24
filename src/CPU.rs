@@ -59,7 +59,7 @@ pub enum Interupt{
 }
 pub struct CPU6502<'a>{
     pc: usize,
-    bus: &'a mut Bus,
+    bus: &'a mut Bus<'a>,
     buffer:u8,
     acc: u8,
     x: u8,
@@ -83,7 +83,7 @@ impl fmt::Display for CPU6502<'_>{
 
 impl<'a> CPU6502<'a>{
     //type Instruction = fn (&mut Self)->();
-    pub fn new(bus: &'a mut Bus)->Self{
+    pub fn new(bus: &'a mut Bus<'a>)->Self{
         CPU6502 { 
             bus: bus,
             pc: 0,
@@ -92,7 +92,7 @@ impl<'a> CPU6502<'a>{
             x:0,
             y:0,
             status: StatusRegister::new(),
-            sp: 0,
+            sp: 0xFF,
             cycles:0,
             opcode: "".to_owned(),
             adrMode: "".to_owned(),
