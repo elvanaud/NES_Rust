@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, collections::VecDeque};
 use crate::Bus_NES::*;
 
 fn to16(h:u8,l:u8)->usize{
@@ -50,6 +50,13 @@ impl fmt::Display for StatusRegister{
         write!(f,"{}{}-{}{}{}{}{}", N,V,B,D,I,Z,C)
     }
 }
+#[derive(PartialEq)]
+pub enum Interupt{
+    RES,
+    NMI,
+    IRQ,
+    BRK
+}
 pub struct CPU6502<'a>{
     pc: usize,
     bus: &'a mut Bus,
@@ -63,7 +70,8 @@ pub struct CPU6502<'a>{
     cycles: usize,
     opcode: String,
     adrMode: String,
-    takeBranch: bool
+    takeBranch: bool,
+    interupts: VecDeque<Interupt>
 }
 
 impl fmt::Display for CPU6502<'_>{
@@ -75,8 +83,59 @@ impl fmt::Display for CPU6502<'_>{
 
 impl<'a> CPU6502<'a>{
     //type Instruction = fn (&mut Self)->();
+    pub fn new(bus: &'a mut Bus)->Self{
+        CPU6502 { 
+            bus: bus,
+            pc: 0,
+            buffer:0,
+            acc:0,
+            x:0,
+            y:0,
+            status: StatusRegister::new(),
+            sp: 0,
+            cycles:0,
+            opcode: "".to_owned(),
+            adrMode: "".to_owned(),
+            takeBranch: false,
+            interupts: vec![Interupt::RES].into()
+        }
+    }
+    
     pub fn tick(&mut self){
-        self.cycles = 0; //reset the cycles just in case
+        if self.cycles != 0{
+            self.cycles-=1;
+            return;
+        }
+        
+        if let Some(interupt) = self.interupts.pop_front(){
+            let mut executeInterupt = true;
+            let adr:usize = match interupt{
+                Interupt::NMI => 0xFFFA,
+                Interupt::RES => 0xFFFC,
+                Interupt::BRK => 0xFFFA,
+                Interupt::IRQ => {
+                    if self.status.I == 0{
+                        executeInterupt = false;
+                    }
+                    0xFFFE
+                }
+            };
+            if executeInterupt{
+                self.cycles = 7;
+                
+                let adrLow = self.bus.read(adr);
+                let adrHigh = self.bus.read(adr+1);
+                
+                self.pushPC();
+                self.push(self.status.asU8());
+                
+                self.status.I = 1;
+                self.pc = to16(adrHigh, adrLow);
+                return;
+            }
+        }
+        
+        
         let opcode = self.pcRead();
         
         match opcode{
@@ -231,35 +290,38 @@ impl<'a> CPU6502<'a>{
             0xF9 => self.AbsoluteY(Self::SBC),
             0xFD => self.AbsoluteX(Self::SBC),
             0xFE => self.AbsoluteXRMW(Self::INC),
-            _=>()
+            _=> {
+                println!("Undefined opcode !! {opcode}");
+            }
         }
+        
+        self.cycles-=1; //consume the current cycle
     }
     
-    pub fn new(bus: &'a mut Bus)->Self{
-        CPU6502 { 
-            bus: bus,
-            pc: 0,
-            buffer:0,
-            acc:0,
-            x:0,
-            y:0,
-            status: StatusRegister::new(),
-            sp: 0,
-            cycles:0,
-            opcode: "".to_owned(),
-            adrMode: "".to_owned(),
-            takeBranch: false
+    pub fn triggerInterupt(&mut self, interupt: Interupt){
+        if self.interupts.contains(&interupt){
+            return; //don't count it twice
         }
+        self.interupts.push_back(interupt);
     }
+    
+    pub fn triggerIRQ(&mut self){
+        self.triggerInterupt(Interupt::IRQ);
+    }
+    
+    pub fn triggerNMI(&mut self){
+        self.triggerInterupt(Interupt::NMI);
+    }
+    
+    pub fn triggerRES(&mut self){
+        self.triggerInterupt(Interupt::RES);
+    }
+    
     
     fn updateNZFlags(&mut self, data:u8){
         self.status.N = data >> 7;
         self.status.Z = if data == 0 {1} else {0};
     }
-    
-    /*fn updateVFlag(&mut self, a:u8, b:u8, res:u8){
-        
-    }*/
     
     fn push(&mut self, data: u8){
         self.bus.write(to16(1, self.sp), data);
@@ -269,6 +331,11 @@ impl<'a> CPU6502<'a>{
     fn pop(&mut self) -> u8{
         self.sp+=1;
         self.bus.read(to16(1, self.sp))
+    }
+    
+    fn pushPC(&mut self){
+        self.push((((self.pc)>>8)&255) as u8);
+        self.push((self.pc&255) as u8);
     }
     
     fn setOpcode(&mut self, op: &str){
@@ -354,16 +421,17 @@ impl<'a> CPU6502<'a>{
     
     fn BRK(&mut self){
         self.setOpcode("BRK");
-        self.cycles = 7;
+        self.cycles = 1; //trigger the interupt right away
         
         self.pc+=1; //ignores the param
-        self.push((((self.pc)>>8)&255) as u8);
-        self.push((self.pc&255) as u8);
+        /*self.pushPC();//svss blabla
         
         let reg = self.status.asU8();
         self.push(reg|(1u8<<4));//push with break flag set
         
-        self.status.I = 1;
+        //self.status.I = 1;
+        */
+        self.triggerInterupt(Interupt::BRK);
     }
     
     fn BVC(&mut self){
@@ -514,8 +582,7 @@ impl<'a> CPU6502<'a>{
         
         self.adrMode = adr.to_string();
         
-        self.push(((self.pc>>8)&255) as u8);
-        self.push((self.pc&255)as u8);
+        self.pushPC();
         
         self.pc = adr;
     }
@@ -750,14 +817,6 @@ impl<'a> CPU6502<'a>{
         }
         adr as usize+data as usize
     }
-    
-    /*fn handlePageCrossRelative(&mut self, adr:usize, data: u8)->usize{
-        let adr = adr as u16;
-        if ((adr&255)+data as u16)>>8 == 1{
-            self.cycles+=1;
-        }
-        adr as usize+data as usize
-    }*/
     
     fn AbsoluteAdr(&mut self, inst:fn (&mut Self)->()){
         self.cycles = 4;
@@ -1091,8 +1150,4 @@ impl<'a> CPU6502<'a>{
         
         self.bus.write(to16(0,offset), self.buffer);
     }
-    
-    /*fn read(adr: usize){
-        
-    }*/
 }
