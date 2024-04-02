@@ -1,3 +1,5 @@
+#![allow(arithmetic_overflow)]
+
 use std::{fmt, collections::VecDeque};
 use crate::Bus_NES::*;
 
@@ -58,7 +60,8 @@ pub enum Interupt{
     BRK
 }
 pub struct CPU6502<'a>{
-    pc: usize,
+    pc: usize, //todo: make this u16
+    oldPC: usize,
     bus: &'a mut Bus<'a>,
     buffer:u8,
     acc: u8,
@@ -77,7 +80,7 @@ pub struct CPU6502<'a>{
 impl fmt::Display for CPU6502<'_>{
     fn fmt(&self, f:&mut fmt::Formatter<'_>)->fmt::Result{
         write!(f,"PC  ,ACC, X , Y, NV-BDIZC\n").unwrap();
-        write!(f,"{} {} {} {} {} {} {}", self.pc, self.opcode, self.adrMode, self.acc, self.x, self.y, self.status)
+        write!(f,"{:#x} {} {} {} {} {} {}", self.pc, self.opcode, self.adrMode, self.acc, self.x, self.y, self.status)
     }
 }
 
@@ -87,6 +90,7 @@ impl<'a> CPU6502<'a>{
         CPU6502 { 
             bus: bus,
             pc: 0,
+            oldPC: 0,
             buffer:0,
             acc:0,
             x:0,
@@ -98,6 +102,15 @@ impl<'a> CPU6502<'a>{
             adrMode: "".to_owned(),
             takeBranch: false,
             interupts: vec![Interupt::RES].into()
+        }
+    }
+    
+    pub fn debugMode(&self){
+        if self.cycles == 0{
+            //println!("{self}\n");
+        }
+        if self.pc == self.oldPC {
+            println!("LOOPING !!!");
         }
     }
     
@@ -114,13 +127,14 @@ impl<'a> CPU6502<'a>{
                 Interupt::RES => 0xFFFC,
                 Interupt::BRK => 0xFFFA,
                 Interupt::IRQ => {
-                    if self.status.I == 0{
+                    if self.status.I == 1{
                         executeInterupt = false;
                     }
                     0xFFFE
                 }
             };
             if executeInterupt{
+                println!("EXECUTING INTERUPT !!");
                 self.cycles = 7;
                 
                 let adrLow = self.bus.read(adr);
@@ -135,7 +149,7 @@ impl<'a> CPU6502<'a>{
             }
         }
         
-        
+        self.oldPC = self.pc;
         let opcode = self.pcRead();
         
         match opcode{
@@ -825,7 +839,7 @@ impl<'a> CPU6502<'a>{
         let adrHigh = self.pcRead();
         let adr = to16(adrHigh, adrLow);
         
-        self.adrMode = adr.to_string();
+        self.adrMode = format!("{adr:#x}");//adr.to_string();
         
         self.buffer = self.bus.read(adr);
         
@@ -992,7 +1006,7 @@ impl<'a> CPU6502<'a>{
                 0
             };
             
-            self.pc = self.handlePageCross(self.pc, self.buffer)+high;
+            self.pc = (self.handlePageCross(self.pc, self.buffer)+high) & 0xFFFF;
         }
     }
     
